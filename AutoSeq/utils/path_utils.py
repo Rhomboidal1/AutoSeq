@@ -2,9 +2,14 @@
 import os
 import re
 import sys
+# Calculate the project's root directory
+def get_project_root():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.dirname(os.path.dirname(script_dir))  # Go up two levels
+
+project_root = get_project_root()
+
 # Add the project's root directory to sys.path
-script_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(os.path.dirname(script_dir))  # Go up two levels
 sys.path.append(project_root)
 
 from AutoSeq.utils.regex import RegexPatterns
