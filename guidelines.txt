@@ -1,0 +1,324 @@
+Thank you for your interest in exploring composition over inheritance! Based on the code you've shared, I can see several areas where shifting to a composition-based approach could benefit your workflow.
+Benefits of Composition for Your Workflow
+Looking at your current codebase, here are specific areas where composition would be beneficial:
+1. File Processing Logic
+Your FolderProcessor class currently handles multiple responsibilities:
+
+Sorting files
+Managing reinjections
+Processing order folders
+Zipping files
+Validating contents
+
+Composition approach:
+
+class FolderProcessor:
+    def __init__(self, config):
+        self.file_sorter = FileSorter(config)
+        self.reinject_manager = ReinjectManager(config)
+        self.order_processor = OrderProcessor(config)
+        self.zip_manager = ZipManager(config)
+        self.validator = ContentValidator(config)
+        self.logger = LoggingService()
+		
+This structure would allow you to:
+
+Test each component independently
+Reuse components across different scripts
+Modify reinject logic without touching file sorting
+
+2. File System Operations
+Your FileSystemDAO handles everything from path manipulation to zip creation. Splitting this into focused components would make maintenance easier:
+
+class FileSystemService:
+    def __init__(self, config):
+        self.path_utils = PathUtilities()
+        self.directory_manager = DirectoryManager()
+        self.file_manager = FileManager()
+        self.zip_manager = ZipManager(config)
+		
+3. User Interface Automation
+The MseqAutomation class could benefit from breaking out dialog-specific handling:
+
+class MseqAutomation:
+    def __init__(self, config):
+        self.dialog_handler = DialogHandler()
+        self.file_navigator = FileNavigator(config.NETWORK_DRIVES)
+        self.process_monitor = ProcessMonitor()
+		
+Practical Implementation Steps
+
+1. Start with utilities: Move path manipulation functions from FileSystemDAO to a dedicated PathUtilities class
+	Target functions like normalize_filename, clean_braces_format, adjust_abi_chars
+2. Extract the reinject management logic: Create a ReinjectManager to handle all reinject-related functionality
+	This would include loading reinject lists and determining if files need reinjection
+3. Create a dedicated logger service: Replace the various logging approaches with a consistent service
+4. Implement configuration injection: Allow components to be configured or replaced at runtime
+
+Example: PathUtilities Implementation
+
+class PathUtilities:
+    def __init__(self):
+        self.regex_patterns = {
+            'inumber': re.compile(r'bioi-(\d+)', re.IGNORECASE),
+            'pcr_number': re.compile(r'{pcr(\d+).+}', re.IGNORECASE),
+            'brace_content': re.compile(r'{.*?}'),
+        }
+        
+    def normalize_filename(self, file_name, remove_extension=True):
+        # Existing normalization logic
+        pass
+    
+    def clean_braces_format(self, file_name):
+        return re.sub(r'{.*?}', '', self.neutralize_suffixes(file_name))
+        
+    def adjust_abi_chars(self, file_name):
+        # Existing character adjustment logic
+        pass
+        
+    def get_inumber_from_name(self, name):
+        match = self.regex_patterns['inumber'].search(str(name).lower())
+        if match:
+            return match.group(1)
+        return None
+		
+This approach would help make your code more maintainable while preserving the overall workflow structure that's currently working for you. Would you like me to focus on a specific area for a more detailed composition strategy?
+
+Ah fantastic, this is indeed already some of what I have started to do, reorganization of modules and functions into more well organized classes. Since I've had your help making the majority of this codebase, we've made it piece by piece but not necessarily in the best order or with respect to overall structure, which is not your fault at all! it just happens when I come and ask about specific things to fix. Now though I think reorganizing things to exist/not exist within a class is a great next move. Isolating functions and reordering them to be more human-parsable is also going to be my next steps, to try and assist any future devs including myself. 
+Re-defining which functions should be in each class is going to be important for future development and I think should be made intuitive, so that if I'm calling a function I should be reasonably able to know what class it comes from.
+
+At the same time we should also examine methods and compare their usage to identify redunancy. I think redundancy can be fine when in the context of code blocks defining a function, but redundancy in methods should be avoided. For instance there are quite a few functions related to removal of brackets or things within brackets, with maybe some slight differences. There also exists throughout the codebase various manual bracket regex. Regex matching is also inconsistent, sometimes referring to our lookup table and sometimes doing so in the function itself. all of these are things I want to have us keep in mind.
+
+I'm glad to hear you're already moving in this direction! Reorganizing the codebase for better structure is indeed a great next step. Let me provide some specific suggestions that address your concerns about intuitive organization and redundancy.
+Creating Intuitive Class Boundaries
+A good rule of thumb is to organize classes around clear responsibilities where the name immediately suggests what functions would be found there:
+PathUtilities - All path/filename manipulation and parsing
+├── normalize_filename()
+├── clean_braces_format() 
+├── get_inumber_from_name()
+└── etc...
+
+OrderProcessor - Business logic for order handling
+├── validate_order_completion()
+├── process_order_folder()
+└── move_to_not_ready()
+
+FileOperations - Low-level file system interactions
+├── move_file()
+├── rename_file()
+└── zip_files()
+
+Standardizing Regex and Bracket Handling
+For the regex inconsistencies, I recommend:
+
+1. Create a single RegexPatterns class that centralizes all patterns:
+
+class RegexPatterns:
+    """Centralized regex patterns for the entire application"""
+    
+    def __init__(self):
+        self.patterns = {
+            'inumber': re.compile(r'bioi-(\d+)', re.IGNORECASE),
+            'pcr_number': re.compile(r'{pcr(\d+).+}', re.IGNORECASE),
+            'brace_content': re.compile(r'{.*?}'),
+            'bioi_folder': re.compile(r'.+bioi-\d+.+', re.IGNORECASE),
+            # Add all other patterns here
+        }
+    
+    def get(self, pattern_name):
+        """Get a compiled regex pattern by name"""
+        return self.patterns.get(pattern_name)
+        
+    def match(self, pattern_name, text):
+        """Match text against a named pattern"""
+        pattern = self.get(pattern_name)
+        if not pattern:
+            return None
+        return pattern.search(text)
+        
+    def extract(self, pattern_name, text, group=1):
+        """Extract a specific group from a pattern match"""
+        match = self.match(pattern_name, text)
+        if match and group <= len(match.groups()):
+            return match.group(group)
+        return None
+2. For bracket handling, create a dedicated utility class:
+
+class BracketHandler:
+    """Handles all bracket-related operations consistently"""
+    
+    def __init__(self, regex_patterns):
+        self.regex = regex_patterns
+        
+    def remove_bracket_content(self, text):
+        """Remove anything contained in brackets"""
+        return re.sub(self.regex.get('brace_content'), '', text)
+        
+    def extract_bracket_content(self, text, pattern_name=None):
+        """Extract content from brackets, optionally filtering by pattern"""
+        if pattern_name:
+            return self.regex.extract(pattern_name, text)
+            
+        # Extract all bracket content
+        matches = re.findall(r'{(.*?)}', text)
+        return matches
+        
+    def has_preemptive_flag(self, text):
+        """Check if text contains the preemptive reinject flag"""
+        return '{!P}' in text
+		
+Eliminating Method Redundancy
+For the various bracket-related and normalization functions scattered throughout your codebase:
+
+1. Identify all similar methods (e.g., clean_braces_format(), remove_braces_from_string(), etc.)
+2. Create a unified implementation in the appropriate utility class
+3. Update all references to use the centralized method
+
+For example:
+
+# Before: Multiple similar methods
+def clean_braces_format(file_name):
+    return re.sub(r'{.*?}', '', file_name)
+    
+def remove_braces_from_string(file_name):
+    return re.sub(r'{.*?}', '', neutralize_suffixes(file_name))
+
+# After: One unified method in BracketHandler
+bracket_handler = BracketHandler(regex_patterns)
+clean_name = bracket_handler.remove_bracket_content(file_name)
+
+Sample Reorganization Plan
+Here's a structure that would make function locations more intuitive:
+
+mseqauto/
+├── core/
+│   ├── file_system.py  # Low-level file operations
+│   ├── automation.py   # MSeq UI automation
+│   └── workflow.py     # Overall workflow orchestration
+├── processing/
+│   ├── order.py        # Order-specific logic
+│   ├── plate.py        # Plate-specific logic  
+│   └── pcr.py          # PCR-specific logic
+├── utils/
+│   ├── path.py         # Path/filename utilities
+│   ├── regex.py        # Regex patterns and utilities
+│   ├── logging.py      # Logging services
+│   └── config.py       # Configuration management
+└── scripts/            # Command-line entry points
+
+Alright I'd like to keep moving forward with the reorganization plans. As of now I have made empty files with the names you specified, although instead of order.py I renamed it to ind.py. Calling it 'order-specific' is a little confusing since plates are plate orders. Ind.py would more accurately reflect that the logic is used for individual sequencing orders. Do you agree with my assessment there?
+
+I completely agree with your assessment! Changing "order.py" to "ind.py" is much clearer and more accurate for your codebase.
+Since you're dealing with multiple order types (individual sequencing, plate sequencing, and PCR projects), using "ind.py" properly differentiates the individual sequencing workflow from the others. This naming also aligns with your existing terminology like "IND Not Ready" folder and your command-line scripts ("ind-sort", "ind-mseq", etc.).
+For the reorganization, here's how I'd recommend dividing responsibilities between these files:
+ind.py
+
+Individual sequencing order processing
+I-number folder management
+Individual sample reinject handling
+Functions specific to BioI folder naming/structure
+
+plate.py
+
+P-number folder processing
+Plate-specific naming conventions
+Nano plate handling
+G5-med and fragment analysis special cases
+
+pcr.py
+
+PCR project folder management
+PCR experiment tracking
+PCR-specific naming conventions (with {PCR#exp#})
+
+This organization makes the file purpose immediately obvious from the name, and each file contains functionality specific to that workflow type.
+Is there any specific functionality you're wondering about how to categorize in this structure?
+
+Nope, I think your suggestions make a lot of sense! Let's move forward with building up the different modules and classes now. Compared to our old implementations of things we may be able to do away with some of the old modules or functions. For example, our new optimized method for navigating the browse folder tree actually works perfectly on both windows 10 and 11, so we don't need the compatibility manager module at all now I'd say.
+
+Going down the line, what modules do you think we should work on first? Also, should I put init.py files in all the subdirectories, and what should the content inside be if anything?
+
+You're right about the OS compatibility manager not being needed anymore if your optimized method works on both Windows versions!
+Module Development Order
+I recommend this sequence for building out your modules:
+
+First: Utils Package
+
+path.py - Create PathUtilities first as it's foundational
+regex.py - Centralize regex patterns for everything else
+logging.py - Set up consistent logging early
+
+
+Second: Core Package
+
+file_system.py - Basic file operations that everything depends on
+automation.py - MSeq automation (relatively independent)
+
+
+Third: Processing Package
+
+ind.py - Individual sequencing logic
+plate.py - Plate sequencing logic
+pcr.py - PCR project logic
+
+
+Finally: Scripts
+
+Update your command-line scripts to use the new structure
+
+
+
+__init__.py Files
+Yes, you should include __init__.py files in all subdirectories to make them proper packages. Here's what to include:
+
+utils/__init__.py
+"""Utility modules for the MseqAuto package."""
+
+from .path import PathUtilities
+from .regex import RegexPatterns
+from .logging import setup_logger
+
+__all__ = ['PathUtilities', 'RegexPatterns', 'setup_logger']
+
+core/__init__.py
+"""Core functionality for the MseqAuto package."""
+
+from .file_system import FileSystem
+from .automation import MseqAutomation
+
+__all__ = ['FileSystem', 'MseqAutomation']
+
+processing/__init__.py
+"""Processing modules for different sequencing types."""
+
+from .ind import IndSequencing
+from .plate import PlateSequencing
+from .pcr import PCRSequencing
+
+__all__ = ['IndSequencing', 'PlateSequencing', 'PCRSequencing']
+
+This structure:
+
+1.Documents what each package contains
+2.Exposes the key classes for easy importing
+3.Controls exactly what's publicly available with __all__
+
+With this approach, users of your library can do things like:
+from mseqauto.utils import PathUtilities
+from mseqauto.processing import IndSequencing
+Instead of:
+from mseqauto.utils.path import PathUtilities
+from mseqauto.processing.ind import IndSequencing
+This makes the imports cleaner while maintaining a well-organized codebase. Does this approach work for you?
+
+Yes it does work for me, although I also plan on adding the parent directory to pythonpath within each of the modules, with something like import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(file))))). This will just help make sure the imports work extra well
+
+That's a good practice to ensure imports work properly during development. The sys.path.append() approach is especially helpful during development and testing when the package isn't formally installed.
+Let's start implementing the first modules in your utils package. Here's what I recommend for each:
+1. utils/regex.py
+
+2. utils/path.py
+
+3. utils/log_service.py
