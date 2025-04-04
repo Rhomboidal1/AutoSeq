@@ -8,10 +8,11 @@ def get_project_root():
     return os.path.dirname(os.path.dirname(script_dir))  # Go up two levels
 
 project_root = get_project_root()
+print(project_root)
 
 # Add the project's root directory to sys.path
 sys.path.append(project_root)
-
+print(sys.path)
 from AutoSeq.utils.regex import RegexPatterns
 
 class PathUtilities:
