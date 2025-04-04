@@ -34,6 +34,16 @@ def get_folder_from_user():
     root.destroy()
     return folder_path
 
+# # automation.py - MSeq UI automation with compositional design
+# import os
+# import time
+# import re
+# import sys
+# import logging
+
+# # Add parent directory to PYTHONPATH for imports
+# sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
 """
 This module provides UI automation for the mSeq software using a composition-based design.
 It handles connecting to mSeq, navigating the UI, and processing folders of sequence files.
@@ -43,6 +53,9 @@ Key components:
 - FileNavigator: Manages file/folder tree navigation
 - ProcessMonitor: Tracks job completion and status
 - MseqAutomation: Main class that composes other components
+
+IMPORTANT: pywinauto imports are intentionally placed inside methods to avoid 
+conflicts with tkinter when used for folder selection.
 """
 
 class DialogHandler:
@@ -51,7 +64,7 @@ class DialogHandler:
     def __init__(self, config, logger=None):
         """Initialize with configuration and logger"""
         self.config = config
-        self.logger = logger or LoggingService(__name__)
+        self.logger = logger
         
         # Set timing values based on OS
         self.click_delay = 0.2
@@ -62,6 +75,9 @@ class DialogHandler:
     
     def wait_for_dialog(self, app, dialog_type):
         """Wait for a specific dialog to appear"""
+        # Import here to avoid conflicts with tkinter
+        from pywinauto import timings
+        
         timeout = self.timeouts.get(dialog_type, 5)
         
         try:
@@ -124,6 +140,9 @@ class DialogHandler:
     
     def click_button(self, dialog, button_titles):
         """Click a button in a dialog using multiple possible titles"""
+        # Import here to avoid conflicts with tkinter
+        from pywinauto.keyboard import send_keys
+        
         for title in button_titles:
             try:
                 button = dialog.child_window(title=title, class_name="Button")
@@ -145,6 +164,9 @@ class DialogHandler:
     
     def select_all_files(self, dialog):
         """Select all files in a dialog"""
+        # Import here to avoid conflicts with tkinter
+        from pywinauto.keyboard import send_keys
+        
         try:
             # Try Windows 10 approach first
             shell_view = dialog.child_window(title="ShellView", class_name="SHELLDLL_DefView")
@@ -179,6 +201,9 @@ class DialogHandler:
     
     def close_all_read_info_dialogs(self, app):
         """Close all Read information for... dialogs that might be open"""
+        # Import here to avoid conflicts with tkinter
+        from pywinauto import findwindows
+        
         try:
             # Find all Read information windows
             read_windows = findwindows.find_elements(
@@ -206,7 +231,7 @@ class FileNavigator:
     def __init__(self, config, logger=None):
         """Initialize with configuration and logger"""
         self.config = config
-        self.logger = logger or LoggingService(__name__)
+        self.logger = logger
         self.network_drives = config.NETWORK_DRIVES
         
         # Timing values
@@ -236,6 +261,9 @@ class FileNavigator:
     
     def navigate_to_folder(self, dialog, path):
         """Navigate to a specific folder in tree view"""
+        # Import here to avoid conflicts with tkinter
+        from pywinauto.keyboard import send_keys
+        
         dialog.set_focus()
         
         # Get tree view
@@ -373,7 +401,7 @@ class ProcessMonitor:
         """Initialize with configuration, dialog handler, and logger"""
         self.config = config
         self.dialog_handler = dialog_handler
-        self.logger = logger or LoggingService(__name__)
+        self.logger = logger
         
         # Timing values
         self.interval = 0.5
@@ -423,42 +451,52 @@ class MseqAutomation:
     
     def __init__(self, config, logger=None):
         """Initialize the automation with configuration settings"""
+        # Note: pywinauto is imported inside methods, not here
         self.config = config
-        self.logger = logger or LoggingService(__name__)
-        
-        # Create component objects
-        self.dialog_handler = DialogHandler(config, self.logger)
-        self.file_navigator = FileNavigator(config, self.logger)
-        self.process_monitor = ProcessMonitor(config, self.dialog_handler, self.logger)
+        self.logger = logger
         
         # Application state
         self.app = None
         self.main_window = None
         self.first_time_browsing = True
         
-        self.logger.info("MseqAutomation initialized")
+        # Create component objects - pass on logger
+        self.dialog_handler = DialogHandler(config, logger)
+        self.file_navigator = FileNavigator(config, logger)
+        self.process_monitor = ProcessMonitor(config, self.dialog_handler, logger)
+        
+        if logger:
+            logger.info("MseqAutomation initialized")
     
     def connect_or_start_mseq(self):
         """Connect to existing mSeq instance or start a new one"""
+        # Import here to avoid conflicts with tkinter
+        from pywinauto import Application, timings
+        from pywinauto.findwindows import ElementNotFoundError, ElementAmbiguousError
+        
         try:
             # Try to connect to an existing instance
             self.app = Application(backend='win32').connect(title_re='[mM]seq.*', timeout=1)
-            self.logger.info("Connected to existing mSeq instance")
+            if self.logger:
+                self.logger.info("Connected to existing mSeq instance")
         except (ElementNotFoundError, timings.TimeoutError):
             # Start a new instance
-            self.logger.info("Starting new mSeq instance")
+            if self.logger:
+                self.logger.info("Starting new mSeq instance")
             start_cmd = f'cmd /c "cd /d {self.config.MSEQ_PATH} && {self.config.MSEQ_EXECUTABLE}"'
             
             try:
                 self.app = Application(backend='win32').start(start_cmd, wait_for_idle=False)
-                self.app.connect(title='mSeq', timeout=self.dialog_handler.timeouts["browse_dialog"])
+                self.app.connect(title='mSeq', timeout=self.config.TIMEOUTS.get("connect", 10))
             except Exception as e:
-                self.logger.error(f"Failed to start mSeq: {e}")
+                if self.logger:
+                    self.logger.error(f"Failed to start mSeq: {e}")
                 raise
         except ElementAmbiguousError:
             # Handle multiple instances
             self.app = Application(backend='win32').connect(title_re='[mM]seq.*', found_index=0)
-            self.logger.warning("Multiple mSeq windows found, connecting to first instance")
+            if self.logger:
+                self.logger.warning("Multiple mSeq windows found, connecting to first instance")
         
         # Get the main window
         for title_pattern in ['mSeq.*', 'Mseq.*']:
@@ -470,63 +508,31 @@ class MseqAutomation:
                 pass
         
         if not self.main_window or not self.main_window.exists():
-            self.logger.error("Could not find mSeq main window")
+            if self.logger:
+                self.logger.error("Could not find mSeq main window")
             raise RuntimeError("Could not find mSeq main window")
             
         return self.app, self.main_window
     
-    def connect_or_start_mseq(self):
-        """Connect to existing mSeq instance or start a new one"""
-        try:
-            # Try to connect to an existing instance
-            self.app = Application(backend='win32').connect(title_re='[mM]seq.*', timeout=1)
-            self.logger.info("Connected to existing mSeq instance")
-        except (ElementNotFoundError, timings.TimeoutError):
-            # Start a new instance
-            self.logger.info("Starting new mSeq instance")
-            start_cmd = f'cmd /c "cd /d {self.config.MSEQ_PATH} && {self.config.MSEQ_EXECUTABLE}"'
-            
-            try:
-                self.app = Application(backend='win32').start(start_cmd, wait_for_idle=False)
-                self.app.connect(title='mSeq', timeout=self.timeouts["connect"])
-            except Exception as e:
-                self.logger.error(f"Failed to start mSeq: {e}")
-                raise
-        except ElementAmbiguousError:
-            # Handle multiple instances
-            self.app = Application(backend='win32').connect(title_re='[mM]seq.*', found_index=0)
-            self.logger.warning("Multiple mSeq windows found, connecting to first instance")
-        
-        # Get the main window
-        for title_pattern in ['mSeq.*', 'Mseq.*']:
-            try:
-                self.main_window = self.app.window(title_re=title_pattern)
-                if self.main_window.exists():
-                    break
-            except:
-                pass
-        
-        if not self.main_window or not self.main_window.exists():
-            self.logger.error("Could not find mSeq main window")
-            raise RuntimeError("Could not find mSeq main window")
-            
-        return self.app, self.main_window
-
-
-
     def process_folder(self, folder_path):
         """Process a folder with mSeq - streamlined version based on successful path"""
+        # Import here to avoid conflicts with tkinter
+        from pywinauto.keyboard import send_keys
+        
         if not os.path.exists(folder_path):
-            self.logger.warning(f"Folder does not exist: {folder_path}")
+            if self.logger:
+                self.logger.warning(f"Folder does not exist: {folder_path}")
             return False
         
         # Check for AB1 files
         ab1_files = [f for f in os.listdir(folder_path) if f.endswith(self.config.ABI_EXTENSION)]
         if not ab1_files:
-            self.logger.warning(f"No AB1 files found in {folder_path}")
+            if self.logger:
+                self.logger.warning(f"No AB1 files found in {folder_path}")
             return False
         
-        self.logger.info(f"Processing folder with {len(ab1_files)} AB1 files: {folder_path}")
+        if self.logger:
+            self.logger.info(f"Processing folder with {len(ab1_files)} AB1 files: {folder_path}")
         
         # Close any existing Read information windows before starting
         if self.app:
@@ -540,17 +546,20 @@ class MseqAutomation:
         
         # Start new project (Ctrl+N)
         send_keys('^n')
-        self.logger.info("Sent Ctrl+N to start new project")
+        if self.logger:
+            self.logger.info("Sent Ctrl+N to start new project")
         
         # Wait for and handle Browse For Folder dialog
         dialog_found = self.dialog_handler.wait_for_dialog(self.app, "browse_dialog")
         if not dialog_found:
-            self.logger.error("Browse For Folder dialog not found")
+            if self.logger:
+                self.logger.error("Browse For Folder dialog not found")
             return False
         
         browse_dialog = self.dialog_handler.get_browse_dialog(self.app)
         if not browse_dialog:
-            self.logger.error("Could not get Browse For Folder dialog reference")
+            if self.logger:
+                self.logger.error("Could not get Browse For Folder dialog reference")
             return False
         
         # Add a delay for the first browsing operation
@@ -560,7 +569,8 @@ class MseqAutomation:
         
         # Navigate to the target folder
         if not self.file_navigator.navigate_to_folder(browse_dialog, folder_path):
-            self.logger.error(f"Failed to navigate to {folder_path}")
+            if self.logger:
+                self.logger.error(f"Failed to navigate to {folder_path}")
             return False
         
         # Click OK button
@@ -599,9 +609,11 @@ class MseqAutomation:
         self.dialog_handler.close_all_read_info_dialogs(self.app)
         
         if completion_success:
-            self.logger.info(f"Successfully processed {folder_path}")
+            if self.logger:
+                self.logger.info(f"Successfully processed {folder_path}")
         else:
-            self.logger.warning(f"Processing may not have completed properly for {folder_path}")
+            if self.logger:
+                self.logger.warning(f"Processing may not have completed properly for {folder_path}")
             return False
         
         return True
@@ -611,9 +623,11 @@ class MseqAutomation:
         if self.app:
             try:
                 self.app.kill()
-                self.logger.info("mSeq application closed")
+                if self.logger:
+                    self.logger.info("mSeq application closed")
             except Exception as e:
-                self.logger.warning(f"Error closing mSeq: {e}")
+                if self.logger:
+                    self.logger.warning(f"Error closing mSeq: {e}")
                 # Try alternative approach
                 if self.main_window and self.main_window.exists():
                     try:
@@ -624,35 +638,34 @@ class MseqAutomation:
 
 # For testing
 def main():
-    # Get folder path first before any package imports
-    data_folder = get_folder_from_user()
+    # Import tkinter first for folder selection
+    # import tkinter as tk
+    # from tkinter import filedialog
     
-    if not data_folder:
-        print("No folder selected, exiting")
-        return
-
-    from pywinauto import Application, timings, findwindows
-    from pywinauto.keyboard import send_keys
-    from pywinauto.findwindows import ElementNotFoundError, ElementAmbiguousError
-    from AutoSeq.config import MseqConfig
-    from AutoSeq.utils.log_service import LoggingService
+    # # Create folder selection dialog
+    # root = tk.Tk()
+    # root.withdraw()
+    # folder_path = filedialog.askdirectory(title="Select folder to process")
     
-    # Setup basic logging
-    logger = LoggingService("test_automation")
-    logger.info("Testing MseqAutomation")
-    
-    # Get config
-    config = MseqConfig()
-    
-    # Create automation object
-    automation = MseqAutomation(config, logger)
-    
-    # Get folder to process
-    root = tk.Tk()
-    root.withdraw()
-    folder_path = filedialog.askdirectory(title="Select folder to process")
-    
-    if folder_path:
+    # if not folder_path:
+    #     print("No folder selected, exiting")
+    #     return
+    folder_path = get_folder_from_user()
+    # Now import components that use pywinauto
+    try:
+        from AutoSeq.config import MseqConfig
+        from AutoSeq.utils.log_service import LoggingService
+        
+        # Setup basic logging
+        logger = LoggingService("test_automation")
+        logger.info("Testing MseqAutomation")
+        
+        # Get config
+        config = MseqConfig()
+        
+        # Create automation object
+        automation = MseqAutomation(config, logger)
+        
         logger.info(f"Selected folder: {folder_path}")
         
         # Process the folder
@@ -662,8 +675,11 @@ def main():
         
         # Close automation
         automation.close()
-    else:
-        logger.info("No folder selected")
+    except ImportError as e:
+        print(f"Error importing required modules: {e}")
+    except Exception as e:
+        print(f"Error during processing: {e}")
+
 
 if __name__ == "__main__":
     main()
